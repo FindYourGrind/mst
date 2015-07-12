@@ -1,0 +1,6 @@
+Package: parking
+Version: 1.0-1
+Section: embedded
+Architecture: armhf
+Maintainer: Michael Stumbra <mstumbra@yahoo.com>
+Description: parking space analyzing program
