@@ -19,16 +19,13 @@ INCLUDES = -I/usr/local/include/opencv -I/usr/local/include
 # define library paths in addition to /usr/lib
 #   if I wanted to include libraries not in /usr/lib I'd specify
 #   their path using -Lpath, something like:
-LFLAGS = -L/usr/local/lib
+LFLAGS =
+# -L/usr/local/lib
 
 # define any libraries to link into executable:
 #   if I want to link in libraries (libx.so or libx.a) I use the -llibname
 #   option, something like (this will link in libmylib.so and libm.so:
 LIBS = -ljsoncpp -lopencv_core -lopencv_imgcodecs -lopencv_imgproc -lpthread
-#-lopencv_core -lopencv_imgproc -lpthread  -lopencv_highgui
-#-lopencv_calib3d -lopencv_contrib -lopencv_core -lopencv_features2d -lopencv_flann -lopencv_gpu -lopencv_highgui -lopencv_imgproc -lopencv_legacy -lopencv_ml -lopencv_nonfree -lopencv_objdetect -lopencv_ocl -lopencv_photo -lopencv_stitching -lopencv_superres -lopencv_ts -lopencv_video -lopencv_videostab -lrt -lpthread -lm -ldl
-
-# -pthread
 
 # define the C source files
 SRCS = cvProcessor.cpp parkingConfig.cpp
@@ -82,7 +79,13 @@ start:
 		sudo service rc.local start
 
 stop:
-		sudo pkill cProcessor
+		sudo pkill $(MAIN)
+
+deb:		$(MAIN) ./package
+		cp $(MAIN) package/usr/bin
+		cp config.json package/etc/parking/parking.conf
+		fakeroot dpkg-deb --build package
+		mv package.deb parking_1.0-1_armhf.deb
 
 # DO NOT DELETE THIS LINE -- make depend needs it
 
