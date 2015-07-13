@@ -175,11 +175,12 @@ void sendReport(int sock, vector<bool>& currentStatus, parkingConfig& conf){
 		buff = report.c_str();
 		while(sended < len){
 			i = send(sock, buff + sended, len - sended, 0);
-			if(i < 0)
+			if(i < 0){
 				if(errno == EAGAIN)
 					continue;
 				else
 					throw 3;
+			}
 			sended += i;
 		}
 		msg_id++;

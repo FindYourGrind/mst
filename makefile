@@ -20,7 +20,6 @@ INCLUDES = -I/usr/local/include/opencv -I/usr/local/include
 #   if I wanted to include libraries not in /usr/lib I'd specify
 #   their path using -Lpath, something like:
 LFLAGS =
-# -L/usr/local/lib
 
 # define any libraries to link into executable:
 #   if I want to link in libraries (libx.so or libx.a) I use the -llibname
@@ -41,7 +40,8 @@ SRCS = cvProcessor.cpp parkingConfig.cpp
 OBJS = $(SRCS:.c=.o)
 
 # define the executable file
-MAIN = cProcessor
+MAIN = exec
+PACKAGE = parking
 
 #
 # The following part of the makefile is generic; it can be used to
@@ -81,11 +81,12 @@ start:
 stop:
 		sudo pkill $(MAIN)
 
-deb:		$(MAIN) ./package
-		cp $(MAIN) package/usr/bin
-		cp config.json package/etc/parking/parking.conf
-		fakeroot dpkg-deb --build package
-		mv package.deb parking_1.0-1_armhf.deb
+deb:		$(MAIN) $(PACKAGE)
+		cp $(MAIN) $(PACKAGE)/usr/bin/$(PACKAGE)
+		cp config.json $(PACKAGE)/etc/$(PACKAGE)/$(PACKAGE).conf
+		cp getStream.py $(PACKAGE)/etc/$(PACKAGE)/
+		fakeroot dpkg-deb --build $(PACKAGE)
+		mv $(PACKAGE).deb $(PACKAGE)_latest_armhf.deb
 
 # DO NOT DELETE THIS LINE -- make depend needs it
 
