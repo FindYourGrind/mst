@@ -26,6 +26,8 @@ mutex configMutex;
 vector<bool> lotStatus;
 mutex lotMutex;
 
+vector<char> reportPic;
+mutex mReportPic;
 
 void processing(vector<char> buff, parkingConfig conf);
 void controlInterface(int sock);
@@ -36,8 +38,19 @@ void sendReport(int sock, vector<bool>& currentStatus, parkingConfig& conf);
 int rotatedColor(cv::Mat& img, cv::RotatedRect& roi);
 int parseAccept(void);
 std::string return_current_time_and_date();
+char *base64_encode(const unsigned char *data, size_t input_length);
 
 volatile bool done = false;
+
+static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
+                                'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
+                                'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
+                                'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
+                                'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
+                                'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+                                'w', 'x', 'y', 'z', '0', '1', '2', '3',
+                                '4', '5', '6', '7', '8', '9', '+', '/'};
+static int mod_table[] = {0, 2, 1};
 
 enum command_id{CMD_REBOOT, CMD_GET_CONFIG, CMD_SET_CONFIG, CMD_SAVE_CONFIG, CMD_LOAD_CONFIG};
 
@@ -155,6 +168,33 @@ int parseAccept(void){
 	}
 }
 
+char *base64_encode(const unsigned char *data, size_t input_length) {
+
+    uint32_t output_length = 4 * ((input_length + 2) / 3);
+
+    char *encoded_data = (char*)malloc(output_length);
+    if (encoded_data == NULL) return NULL;
+
+    for (uint32_t i = 0, j = 0; i < input_length;) {
+
+        uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
+
+        uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+
+        encoded_data[j++] = encoding_table[(triple >> 3 * 6) & 0x3F];
+        encoded_data[j++] = encoding_table[(triple >> 2 * 6) & 0x3F];
+        encoded_data[j++] = encoding_table[(triple >> 1 * 6) & 0x3F];
+        encoded_data[j++] = encoding_table[(triple >> 0 * 6) & 0x3F];
+    }
+
+    for (int i = 0; i < mod_table[input_length % 3]; i++)
+        encoded_data[output_length - 1 - i] = '=';
+
+    return encoded_data;
+}
+
 void sendReport(int sock, vector<bool>& currentStatus, parkingConfig& conf){
 	static unsigned msg_id = 0;
 	int i, sended = 0, len = 0;
@@ -162,17 +202,35 @@ void sendReport(int sock, vector<bool>& currentStatus, parkingConfig& conf){
         Json::Value root;
        	Json::FastWriter writer;
 	string report;
+        string request;
+        string pic;
+        char* pPic;
+
 	try{
 		root["dev_id"] = conf.uid;
-		root["dev_type"] = 1;
-		root["timestamp"] = (int)time(0);
-		root["msg_id"] = msg_id;
-		root["additional"] = "";
 		for(unsigned i = 0; i < currentStatus.size(); i++)
-			root["lot"][i] = (currentStatus[i]) ? 1 : 0;
+                        root["lot"][i] = (currentStatus[i]) ? 1 : 0;
+
+		mReportPic.lock();
+                pPic = base64_encode((const unsigned char*)&(reportPic[0]), reportPic.size());
+                for(uint32_t i = 0; i < (reportPic.size()); i++){
+			pic += (char)pPic[i];
+		}
+                root["_POST"] = pic.c_str();
+		mReportPic.unlock();
+
 		report = writer.write(root);
-		len = report.length() + 1;
-		buff = report.c_str();
+
+                request =  "POST /rest/v2/camera/ban HTTP/1.1\r\n";
+		request += "Host: liko-t4p.rhcloud.com\r\n";
+		request += "Connection: keep-alive\r\n";
+		request += "Content-Type: application/json\r\n";
+		request += "Content-Length: %u\r\n";
+		request += "\r\n";
+                request += report;
+		buff = request.c_str();
+                sprintf((char *) buff, (const char *) buff, report.length());
+		len = request.length() + 1;
 		while(sended < len){
 			i = send(sock, buff + sended, len - sended, 0);
 			if(i < 0){
@@ -194,7 +252,20 @@ void reportInterface(parkingConfig conf){
 	int cli = 0, i = 0;
 	struct addrinfo hints, *servinfo, *p;
 	vector<bool> lastSendStatus;
-	while(!done) try {
+	while(!done){
+	    vector<bool> currentStatus;
+	    try{
+		lotMutex.lock();
+		currentStatus = lotStatus;
+		lotMutex.unlock();
+            }catch(...){
+		lotMutex.unlock();
+		throw 5;
+ 	    }
+
+            if((currentStatus.size() != lastSendStatus.size()) | (currentStatus != lastSendStatus)){
+
+            try {
 		cout << "Report interface connect procedure started\n";
 		memset(&hints, 0, sizeof hints);
 		hints.ai_family		= AF_UNSPEC;
@@ -230,23 +301,9 @@ void reportInterface(parkingConfig conf){
 		if (p == NULL)
 			throw 2;
 		cout << "Report interface connected successfully\n";
-		while(!done) {
-			vector<bool> currentStatus;
-			try{
-				lotMutex.lock();
-				currentStatus = lotStatus;
-				lotMutex.unlock();
-			}catch(...){
-				lotMutex.unlock();
-				throw 5;
-			}
-			if(currentStatus.size() != lastSendStatus.size())
-				sendReport(cli, currentStatus, conf);
-			else if(currentStatus != lastSendStatus)
-				sendReport(cli, currentStatus, conf);
-			lastSendStatus = currentStatus;
-			sleep(60);
-		}
+
+		sendReport(cli, currentStatus, conf);
+		lastSendStatus = currentStatus;
 
 	}catch(int e){
 		switch(e){
@@ -276,6 +333,9 @@ void reportInterface(parkingConfig conf){
 		}
 	}
 	close(cli);
+        sleep(20);
+	}
+    }
 }
 
 void controlInterfaceServer(){
@@ -332,6 +392,7 @@ void processing(vector<char> buff, parkingConfig conf){
 	vector<int> quality;
 	stringstream ss;
 	vector<bool> status;
+
 	try{
 		quality.push_back(CV_IMWRITE_JPEG_QUALITY);
 		quality.push_back(conf.JPEGQuality);
@@ -360,9 +421,11 @@ void processing(vector<char> buff, parkingConfig conf){
 			//cout << num << ": " << carPresent << "\t" << value << endl;
 			drawROI(output, conf.ROI[num], carPresent);
 		}
+
 		lotMutex.lock();
 			lotStatus = status;
 		lotMutex.unlock();
+
 		if(conf.timestamp)
 			cv::putText(output, return_current_time_and_date(), cv::Point(20, 25), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255), 2);
 		imwrite(ss.str(), output, quality);
@@ -411,6 +474,18 @@ int main(int argc, char* argv[])
 			cin.read((char*)&len, 4);
 			vector<char> buff(len);
 			cin.read(buff.data(), len);
+
+			mReportPic.lock();
+
+                        reportPic.clear();
+			reportPic.push_back(0);
+			reportPic.push_back(0);
+			reportPic.push_back(0);
+			reportPic.push_back(0);
+			reportPic.push_back(0);
+
+                        mReportPic.unlock();
+
 			while(threads.size() >= maxThreads){
 				threads.front().join();
 				threads.pop();
